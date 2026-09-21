@@ -1,0 +1,22 @@
+{
+  "name": "logiclab-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LogicLab 组合逻辑电路实验台 —— 算法内核服务",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsc -w -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

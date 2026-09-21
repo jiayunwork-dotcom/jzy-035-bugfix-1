@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    image: logiclab-backend:latest
+    environment:
+      - PORT=3001
+    expose:
+      - "3001"
+
+  frontend:
+    build: ./frontend
+    image: logiclab-frontend:latest
+    environment:
+      - PORT=8080
+      - BACKEND_URL=http://backend:3001
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend

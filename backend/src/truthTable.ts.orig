@@ -1,0 +1,198 @@
+import { evaluate } from './evaluate.js';
+import type {
+  Bit,
+  Circuit,
+  ExpressionResult,
+  Literal,
+  SopTerm,
+  TruthTable,
+  TruthTableRow
+} from './types.js';
+
+/** 行太多时仍然允许生成，但给出提示的阈值（2^10 = 1024 行） */
+export const LARGE_TABLE_WARNING_INPUTS = 10;
+/** 硬上限：2^20 ≈ 105 万行，再大直接拒绝以免服务端被拖垮 */
+export const MAX_TRUTH_TABLE_INPUTS = 20;
+
+export interface TruthTableOptions {
+  /** 指定参与穷举的输入开关 id（缺省取电路中全部输入开关） */
+  inputIds?: string[];
+  /** 指定观察的输出灯 id（缺省取全部输出指示灯） */
+  outputIds?: string[];
+}
+
+/** 按位置（先 x 后 y）排序，取默认变量名 A,B,C... */
+export function defaultInputs(circuit: Circuit) {
+  return circuit.nodes
+    .filter((n) => n.type === 'input')
+    .sort((a, b) => (a.x - b.x || a.y - b.y));
+}
+
+export function defaultOutputs(circuit: Circuit) {
+  return circuit.nodes
+    .filter((n) => n.type === 'output')
+    .sort((a, b) => (a.x - b.x || a.y - b.y));
+}
+
+function fallbackName(prefix: string, index: number) {
+  return `${prefix}${index + 1}`;
+}
+
+/**
+ * 穷举全部 2^n 个输入组合，逐行调用同一套求值内核，拼出完整真值表。
+ */
+export function buildTruthTable(
+  circuit: Circuit,
+  options: TruthTableOptions = {}
+): TruthTable {
+  const inputs = options.inputIds
+    ? options.inputIds
+        .map((id) => circuit.nodes.find((n) => n.id === id))
+        .filter((n): n is NonNullable<typeof n> => !!n && n.type === 'input')
+    : defaultInputs(circuit);
+  const outputs = options.outputIds
+    ? options.outputIds
+        .map((id) => circuit.nodes.find((n) => n.id === id))
+        .filter((n): n is NonNullable<typeof n> => !!n && n.type === 'output')
+    : defaultOutputs(circuit);
+
+  const n = inputs.length;
+  if (n > MAX_TRUTH_TABLE_INPUTS) {
+    throw new Error(
+      `输入变量多达 ${n} 个，真值表有 2^${n} 行，超过最多 ${MAX_TRUTH_TABLE_INPUTS} 个变量的穷举上限`
+    );
+  }
+
+  const inputNames = inputs.map((node, i) => node.label?.trim() || fallbackName('X', i));
+  const outputNames = outputs.map((node, i) => node.label?.trim() || fallbackName('F', i));
+
+  // 预先检查环：有环时不生成真值表
+  const probe = evaluate(withValues(circuit, inputs.map(() => 0)));
+  if (probe.cyclic) {
+    throw new Error('电路存在反馈环，无法穷举真值表');
+  }
+
+  const rowCount = 2 ** n;
+  const rows: TruthTableRow[] = [];
+  for (let mask = 0; mask < rowCount; mask++) {
+    const inputBits: Bit[] = [];
+    for (let i = 0; i < n; i++) {
+      // 第 0 个变量为最高位（MSB），与课堂真值表书写习惯一致
+      const bit = ((mask >> (n - 1 - i)) & 1) as Bit;
+      inputBits.push(bit);
+    }
+    const result = evaluate(withValues(circuit, inputBits, inputs.map((x) => x.id)));
+    const outputBits = outputs.map((o) => result.outputLights[o.id] ?? 0);
+    rows.push({ inputs: inputBits, outputs: outputBits });
+  }
+
+  return {
+    inputIds: inputs.map((x) => x.id),
+    inputNames,
+    outputIds: outputs.map((x) => x.id),
+    outputNames,
+    rows,
+    rowCount,
+    warning:
+      n >= LARGE_TABLE_WARNING_INPUTS
+        ? `共有 ${n} 个输入变量，真值表达 ${rowCount.toLocaleString()} 行，已照常生成但规模较大`
+        : undefined
+  };
+}
+
+/** 返回一个把指定输入开关替换成给定电平后的新电路（不改原对象） */
+export function withValues(
+  circuit: Circuit,
+  values: Bit[],
+  ids?: string[]
+): Circuit {
+  const targetIds =
+    ids ?? defaultInputs(circuit).map((n) => n.id);
+  const valueById = new Map<string, Bit>();
+  targetIds.forEach((id, i) => valueById.set(id, values[i]!));
+  return {
+    nodes: circuit.nodes.map((n) =>
+      n.type === 'input' && valueById.has(n.id)
+        ? { ...n, value: valueById.get(n.id) }
+        : n
+    ),
+    edges: circuit.edges
+  };
+}
+
+/** 真值表导出 CSV（第一行表头） */
+export function truthTableToCsv(table: TruthTable): string {
+  const header = [...table.inputNames, ...table.outputNames].join(',');
+  const lines = [header];
+  for (const row of table.rows) {
+    lines.push([...row.inputs, ...row.outputs].join(','));
+  }
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// SOP（积之和）表达式提取
+// ---------------------------------------------------------------------------
+
+function formatLiteral(lit: Literal): string {
+  if (lit.kind === 'const') return String(lit.value);
+  return lit.negated ? `${lit.name}'` : lit.name;
+}
+
+/** 单个乘积项文字，如 A·B'·C */
+export function formatTerm(term: SopTerm): string {
+  if (term.literals.length === 0) return '1';
+  return term.literals.map(formatLiteral).join('·');
+}
+
+/** 完整 SOP 文本，如 A·B + B'·C；恒 0 / 恒 1 特殊处理 */
+export function formatExpression(terms: SopTerm[], constant?: 0 | 1): string {
+  if (constant !== undefined) return String(constant);
+  if (terms.length === 0) return '0';
+  return terms.map(formatTerm).join(' + ');
+}
+
+/**
+ * 基于真值表为某个输出抽取规范 SOP（Canonical Sum of Products）：
+ * 对每个输出为 1 的输入组合生成一个最小项，变量取 0 时写成反变量。
+ */
+export function extractSop(table: TruthTable, outputIndex: number): ExpressionResult {
+  const name = table.outputNames[outputIndex]!;
+  const terms: SopTerm[] = [];
+  const minterms: number[] = [];
+  let ones = 0;
+
+  table.rows.forEach((row, mask) => {
+    if (row.outputs[outputIndex] !== 1) return;
+    ones++;
+    minterms.push(mask);
+    const literals: Literal[] = [];
+    row.inputs.forEach((bit, i) => {
+      literals.push({
+        kind: 'var',
+        name: table.inputNames[i]!,
+        negated: bit === 0
+      });
+    });
+    terms.push({ literals, minterm: mask });
+  });
+
+  if (ones === 0) {
+    return { outputId: table.outputIds[outputIndex]!, outputName: name, canonical: '0', terms: [], minterms: [], constant: 0 };
+  }
+  if (ones === table.rows.length) {
+    return { outputId: table.outputIds[outputIndex]!, outputName: name, canonical: '1', terms: [], minterms, constant: 1 };
+  }
+  return {
+    outputId: table.outputIds[outputIndex]!,
+    outputName: name,
+    canonical: formatExpression(terms),
+    terms,
+    minterms
+  };
+}
+
+/** 一次性为全部输出抽取 SOP */
+export function extractAllSop(table: TruthTable): ExpressionResult[] {
+  return table.outputIds.map((_, i) => extractSop(table, i));
+}
