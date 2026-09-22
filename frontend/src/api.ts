@@ -48,11 +48,11 @@ export const api = {
   evaluate(circuit: Circuit) {
     return post<EvaluateResult>('/evaluate', circuit);
   },
-  analyze(circuit: Circuit) {
-    return post<AnalyzeResult>('/analyze', { circuit });
+  analyze(circuit: Circuit, inputIds?: string[]) {
+    return post<AnalyzeResult>('/analyze', { circuit, inputIds });
   },
-  truthTableCsv(circuit: Circuit) {
-    return post<{ csv: string; filename: string }>('/truth-table/csv', { circuit });
+  truthTableCsv(circuit: Circuit, inputIds?: string[]) {
+    return post<{ csv: string; filename: string }>('/truth-table/csv', { circuit, inputIds });
   },
   levels() {
     return get<{ levels: Level[] }>('/levels');

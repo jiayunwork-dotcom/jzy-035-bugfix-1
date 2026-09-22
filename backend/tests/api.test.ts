@@ -89,6 +89,56 @@ describe('HTTP API 集成', () => {
     expect(r.json.karnaughMaps[0].simplified).toBe('A·B');
   });
 
+  it('POST /api/analyze 支持只穷举勾选的输入，其余开关按当前电平固定', async () => {
+    // Y = A·C，三个输入开关 A、B、C，B 钉在 0；只枚举 A、C
+    const circuit = {
+      nodes: [
+        { id: 'a', type: 'input', x: 0, y: 0, label: 'A', value: 0 },
+        { id: 'b', type: 'input', x: 0, y: 40, label: 'B', value: 0 },
+        { id: 'c', type: 'input', x: 0, y: 80, label: 'C', value: 0 },
+        { id: 'g', type: 'and', x: 120, y: 40 },
+        { id: 'y', type: 'output', x: 240, y: 40, label: 'Y' }
+      ],
+      edges: [
+        { id: 'e1', source: 'a', target: 'g', inputPort: 0 },
+        { id: 'e2', source: 'c', target: 'g', inputPort: 1 },
+        { id: 'e3', source: 'g', target: 'y', inputPort: 0 }
+      ]
+    };
+    const r = await post('/api/analyze', { circuit, inputIds: ['a', 'c'] });
+    expect(r.status).toBe(200);
+    const tt = r.json.truthTable;
+    expect(tt.inputNames).toEqual(['A', 'C']);
+    expect(tt.rowCount).toBe(4);
+    expect(tt.rows.map((row: { outputs: number[] }) => row.outputs[0])).toEqual([0, 0, 0, 1]);
+    expect(r.json.expressions[0].canonical).toBe('A·C');
+    expect(r.json.karnaughMaps[0].simplified).toBe('A·C');
+
+    // 未选中的开关 B 钉在 1 且确实参与运算：改成 Y = A·B·C（两级与门），
+    // 只枚举 A、C 时结果应为 A·C（B=1），证明枚举位没被错配给 B。
+    const circuit3 = {
+      nodes: [
+        { id: 'a', type: 'input', x: 0, y: 0, label: 'A', value: 0 },
+        { id: 'b', type: 'input', x: 0, y: 40, label: 'B', value: 1 },
+        { id: 'c', type: 'input', x: 0, y: 80, label: 'C', value: 0 },
+        { id: 'g1', type: 'and', x: 120, y: 20 },
+        { id: 'g2', type: 'and', x: 240, y: 40 },
+        { id: 'y', type: 'output', x: 360, y: 40, label: 'Y' }
+      ],
+      edges: [
+        { id: 'e1', source: 'a', target: 'g1', inputPort: 0 },
+        { id: 'e2', source: 'b', target: 'g1', inputPort: 1 },
+        { id: 'e3', source: 'g1', target: 'g2', inputPort: 0 },
+        { id: 'e4', source: 'c', target: 'g2', inputPort: 1 },
+        { id: 'e5', source: 'g2', target: 'y', inputPort: 0 }
+      ]
+    };
+    const r3 = await post('/api/truth-table', { circuit: circuit3, inputIds: ['a', 'c'] });
+    expect(r3.status).toBe(200);
+    expect(r3.json.inputNames).toEqual(['A', 'C']);
+    expect(r3.json.rows.map((row: { outputs: number[] }) => row.outputs[0])).toEqual([0, 0, 0, 1]);
+  });
+
   it('反馈环电路：/api/evaluate 返回 cyclic=true，/api/verify 不放行', async () => {
     const circuit = {
       nodes: [

@@ -464,6 +464,35 @@ body {
   font-size: 15px;
 }
 
+.input-picker .picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+.picker-item:hover {
+  border-color: var(--primary);
+}
+.picker-item .picker-name {
+  font-weight: 600;
+}
+.picker-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .table-scroll {
   max-height: 320px;
   overflow: auto;

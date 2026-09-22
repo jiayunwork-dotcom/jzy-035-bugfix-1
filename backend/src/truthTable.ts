@@ -106,7 +106,9 @@ export function withValues(
   values: Bit[],
   ids?: string[]
 ): Circuit {
-  const targetIds = defaultInputs(circuit).map((n) => n.id);
+  // 必须严格按传入的 ids 对位赋值：选子集穷举时，只有被选中的开关
+  // 取枚举值，其余输入开关不在此映射中，保留电路里的当前电平参与运算。
+  const targetIds = ids ?? defaultInputs(circuit).map((n) => n.id);
   const valueById = new Map<string, Bit>();
   targetIds.forEach((id, i) => valueById.set(id, values[i]!));
   return {

@@ -224,15 +224,50 @@ export default function App() {
     [circuit.nodes]
   );
 
+  // 画布上的输入开关（与后端默认顺序一致：先 x 后 y）
+  const inputNodes = useMemo(
+    () =>
+      circuit.nodes
+        .filter((n) => n.type === 'input')
+        .sort((a, b) => a.x - b.x || a.y - b.y),
+    [circuit.nodes]
+  );
+
+  // 勾选参与穷举的输入；null 表示全部（默认）。未勾选的开关保持当前电平参与运算。
+  const [pickedInputs, setPickedInputs] = useState<Set<string> | null>(null);
+
+  const analyzeInputIds = useMemo(() => {
+    if (pickedInputs === null) return undefined;
+    return inputNodes.filter((n) => pickedInputs.has(n.id)).map((n) => n.id);
+  }, [pickedInputs, inputNodes]);
+
+  const handleTogglePick = useCallback(
+    (id: string) => {
+      setPickedInputs((prev) => {
+        const next = new Set(prev ?? inputNodes.map((n) => n.id));
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    },
+    [inputNodes]
+  );
+
+  const handlePickAll = useCallback(() => setPickedInputs(null), []);
+
   const handleAnalyze = useCallback(async () => {
     if (inputCount === 0 || outputCount === 0) {
       setAnalyzeError('电路至少需要一个输入开关和一个输出指示灯');
       return;
     }
+    if (analyzeInputIds && analyzeInputIds.length === 0) {
+      setAnalyzeError('请至少勾选一个参与穷举的输入开关（或点「全选」）');
+      return;
+    }
     setAnalyzing(true);
     setAnalyzeError(null);
     try {
-      const r = await api.analyze(circuit);
+      const r = await api.analyze(circuit, analyzeInputIds);
       setAnalysis(r);
       setTab('analyze');
     } catch (err) {
@@ -240,11 +275,11 @@ export default function App() {
     } finally {
       setAnalyzing(false);
     }
-  }, [circuit, inputCount, outputCount]);
+  }, [circuit, inputCount, outputCount, analyzeInputIds]);
 
   const handleExportCsv = useCallback(async () => {
     try {
-      const r = await api.truthTableCsv(circuit);
+      const r = await api.truthTableCsv(circuit, analyzeInputIds);
       const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -255,7 +290,7 @@ export default function App() {
     } catch (err) {
       showToast(err instanceof Error ? err.message : '导出失败');
     }
-  }, [circuit, showToast]);
+  }, [circuit, analyzeInputIds, showToast]);
 
   /* ------------------------------ 关卡 ------------------------------ */
 
@@ -407,7 +442,11 @@ export default function App() {
                 loading={analyzing}
                 error={analyzeError}
                 onExportCsv={handleExportCsv}
-                nInputs={inputCount}
+                inputs={inputNodes}
+                picked={pickedInputs}
+                onTogglePick={handleTogglePick}
+                onPickAll={handlePickAll}
+                onReAnalyze={handleAnalyze}
               />
             ) : (
               <>
