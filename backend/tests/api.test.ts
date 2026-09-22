@@ -89,6 +89,60 @@ describe('HTTP API 集成', () => {
     expect(r.json.karnaughMaps[0].simplified).toBe('A·B');
   });
 
+  it('POST /api/truth-table 选子集 inputIds：Y=A·C，只穷举 A、C（B 钉 0）四行仅 m3=1', async () => {
+    const circuit = {
+      nodes: [
+        { id: 'a', type: 'input', x: 0, y: 0, label: 'A', value: 0 },
+        { id: 'b', type: 'input', x: 0, y: 40, label: 'B', value: 0 },
+        { id: 'c', type: 'input', x: 0, y: 80, label: 'C', value: 0 },
+        { id: 'g', type: 'and', x: 120, y: 40 },
+        { id: 'y', type: 'output', x: 240, y: 40, label: 'Y' }
+      ],
+      edges: [
+        { id: 'e1', source: 'a', target: 'g', inputPort: 0 },
+        { id: 'e2', source: 'c', target: 'g', inputPort: 1 },
+        { id: 'e3', source: 'g', target: 'y', inputPort: 0 }
+      ]
+    };
+    const r = await post('/api/truth-table', { circuit, inputIds: ['a', 'c'] });
+    expect(r.status).toBe(200);
+    expect(r.json.inputIds).toEqual(['a', 'c']);
+    expect(r.json.inputNames).toEqual(['A', 'C']);
+    expect(r.json.rowCount).toBe(4);
+    expect(r.json.rows.map((row: { outputs: number[] }) => row.outputs[0])).toEqual([
+      0,
+      0,
+      0,
+      1
+    ]);
+  });
+
+  it('POST /api/analyze 选子集后派生表达式与卡诺图也基于子集：B 钉 1 时 Yabc=A·C', async () => {
+    const circuit = {
+      nodes: [
+        { id: 'a', type: 'input', x: 0, y: 0, label: 'A', value: 0 },
+        { id: 'b', type: 'input', x: 0, y: 40, label: 'B', value: 1 },
+        { id: 'c', type: 'input', x: 0, y: 80, label: 'C', value: 0 },
+        { id: 'g1', type: 'and', x: 120, y: 20 },
+        { id: 'g2', type: 'and', x: 260, y: 40 },
+        { id: 'y', type: 'output', x: 400, y: 40, label: 'Y' }
+      ],
+      edges: [
+        { id: 'e1', source: 'a', target: 'g1', inputPort: 0 },
+        { id: 'e2', source: 'b', target: 'g1', inputPort: 1 },
+        { id: 'e3', source: 'g1', target: 'g2', inputPort: 0 },
+        { id: 'e4', source: 'c', target: 'g2', inputPort: 1 },
+        { id: 'e5', source: 'g2', target: 'y', inputPort: 0 }
+      ]
+    };
+    const r = await post('/api/analyze', { circuit, inputIds: ['a', 'c'] });
+    expect(r.status).toBe(200);
+    expect(r.json.truthTable.rowCount).toBe(4);
+    expect(r.json.expressions[0].canonical).toBe('A·C');
+    expect(r.json.karnaughMaps[0].nVars).toBe(2);
+    expect(r.json.karnaughMaps[0].simplified).toBe('A·C');
+  });
+
   it('反馈环电路：/api/evaluate 返回 cyclic=true，/api/verify 不放行', async () => {
     const circuit = {
       nodes: [

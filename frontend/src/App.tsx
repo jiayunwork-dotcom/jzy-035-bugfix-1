@@ -41,6 +41,8 @@ export default function App() {
   const [analysis, setAnalysis] = useState<AnalyzeResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  /** 勾选参与穷举的输入开关 id；未勾选的在穷举时保持当前电平 */
+  const [selectedInputIds, setSelectedInputIds] = useState<Set<string>>(new Set());
   const [levels, setLevels] = useState<Level[]>([]);
   const [activeLevel, setActiveLevel] = useState<string | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
@@ -99,6 +101,8 @@ export default function App() {
       // 拨开关也算一次可撤销操作
       history.setState((c) => toggleSwitch(c, id));
       setVerifyResult(null);
+      // 未选开关按“当前电平”固定，拨开关后旧的子集分析结论可能失效
+      setAnalysis(null);
     },
     [history]
   );
@@ -224,15 +228,60 @@ export default function App() {
     [circuit.nodes]
   );
 
+  // 与后端 defaultInputs 相同的顺序（先 x 后 y），保证勾选顺序即真值表列顺序
+  const inputNodes = useMemo(
+    () =>
+      circuit.nodes
+        .filter((n) => n.type === 'input')
+        .sort((a, b) => a.x - b.x || a.y - b.y),
+    [circuit.nodes]
+  );
+
+  // 电路增删输入开关后同步勾选集合：
+  // 从未初始化过时默认全选；之后保留仍存在的勾选，新增开关默认参与穷举
+  useEffect(() => {
+    setSelectedInputIds((prev) => {
+      if (prev.size === 0) return new Set(inputNodes.map((n) => n.id));
+      const ids = new Set(inputNodes.map((n) => n.id));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      // 新出现的开关（prev 里没有）默认勾选
+      inputNodes.forEach((n) => {
+        if (!prev.has(n.id)) next.add(n.id);
+      });
+      return next;
+    });
+  }, [inputNodes]);
+
+  const handleToggleInputSelected = useCallback((id: string, checked: boolean) => {
+    setSelectedInputIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    // 勾选集合变化后，旧分析结果不再对应当前选择，清掉以免误读
+    setAnalysis(null);
+  }, []);
+
+  const handleSelectAllInputs = useCallback(() => {
+    setSelectedInputIds(new Set(inputNodes.map((n) => n.id)));
+  }, [inputNodes]);
+
   const handleAnalyze = useCallback(async () => {
     if (inputCount === 0 || outputCount === 0) {
       setAnalyzeError('电路至少需要一个输入开关和一个输出指示灯');
       return;
     }
+    // 按画布位置排序后的勾选 id，保证真值表列顺序稳定
+    const ids = inputNodes.map((n) => n.id).filter((id) => selectedInputIds.has(id));
+    if (ids.length === 0) {
+      setAnalyzeError('请至少勾选一个参与穷举的输入开关');
+      return;
+    }
     setAnalyzing(true);
     setAnalyzeError(null);
     try {
-      const r = await api.analyze(circuit);
+      const r = await api.analyze(circuit, ids);
       setAnalysis(r);
       setTab('analyze');
     } catch (err) {
@@ -240,11 +289,12 @@ export default function App() {
     } finally {
       setAnalyzing(false);
     }
-  }, [circuit, inputCount, outputCount]);
+  }, [circuit, inputCount, inputNodes, outputCount, selectedInputIds]);
 
   const handleExportCsv = useCallback(async () => {
     try {
-      const r = await api.truthTableCsv(circuit);
+      const ids = inputNodes.map((n) => n.id).filter((id) => selectedInputIds.has(id));
+      const r = await api.truthTableCsv(circuit, ids.length > 0 ? ids : undefined);
       const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -255,7 +305,7 @@ export default function App() {
     } catch (err) {
       showToast(err instanceof Error ? err.message : '导出失败');
     }
-  }, [circuit, showToast]);
+  }, [circuit, inputNodes, selectedInputIds, showToast]);
 
   /* ------------------------------ 关卡 ------------------------------ */
 
@@ -339,7 +389,11 @@ export default function App() {
             清空
           </button>
           <span className="divider" />
-          <button className="btn primary" onClick={handleAnalyze} disabled={analyzing}>
+          <button
+            className="btn primary"
+            onClick={handleAnalyze}
+            disabled={analyzing || (inputCount > 0 && selectedInputIds.size === 0)}
+          >
             {analyzing ? '分析中…' : '🔍 分析电路'}
           </button>
           {tab === 'levels' && activeLevel && (
@@ -407,7 +461,10 @@ export default function App() {
                 loading={analyzing}
                 error={analyzeError}
                 onExportCsv={handleExportCsv}
-                nInputs={inputCount}
+                inputNodes={inputNodes}
+                selectedInputIds={selectedInputIds}
+                onToggleInput={handleToggleInputSelected}
+                onSelectAllInputs={handleSelectAllInputs}
               />
             ) : (
               <>

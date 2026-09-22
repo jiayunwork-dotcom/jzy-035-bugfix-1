@@ -112,3 +112,53 @@ describe('性质测试：SOP / 卡诺图对任意随机电路都与真值表一�
     });
   }
 });
+
+describe('性质测试：子集穷举的每一行都等于全选表里“未选开关取当前电平”的那一行', () => {
+  for (let seed = 1; seed <= 12; seed++) {
+    it(`随机电路 seed=${seed}，随机挑子集、随机钉未选电平`, () => {
+      const nVars = 2 + (seed % 3); // 2,3,4
+      const circuit = randomCircuit(nVars, seed * 97 + 13);
+
+      // 给每个开关随机钉一个当前电平
+      const fixed = circuit.nodes
+        .filter((n) => n.type === 'input')
+        .map((n) => {
+          const v = ((seed * 7 + n.y) % 2) as Bit;
+          n.value = v;
+          return { id: n.id, v };
+        });
+
+      // 确定性地挑一个非空真子集（2 变量时退化为只选 1 个）
+      let selected = fixed
+        .filter((_, i) => (nVars === 2 ? i === 0 : ((seed >> (i % 3)) & 1) === 1))
+        .map((x) => x.id);
+      if (selected.length === 0) selected = [fixed[0]!.id];
+      const selectedSet = new Set(selected);
+
+      const subset = buildTruthTable(circuit, { inputIds: selected });
+      const full = buildTruthTable(circuit);
+
+      expect(subset.rowCount).toBe(2 ** selected.length);
+      expect(subset.inputIds).toEqual(selected);
+
+      for (const row of subset.rows) {
+        // 用子集列的值 + 未选开关的当前电平，拼出全选表里对应的完整输入向量
+        const fullInputs = fixed.map((f, i) =>
+          selectedSet.has(f.id) ? row.inputs[selected.indexOf(f.id)]! : fixed[i]!.v
+        );
+        const fullRow = full.rows.find(
+          (r) => r.inputs.every((bit, i) => bit === fullInputs[i])
+        )!;
+        expect(fullRow).toBeDefined();
+        expect(row.outputs).toEqual(fullRow.outputs);
+      }
+
+      // 派生 SOP 的最小项行输出必须为 1（子集链路自洽）
+      const sop = extractSop(subset, 0);
+      if (sop.constant === undefined) {
+        for (const m of sop.minterms) expect(subset.rows[m]!.outputs[0]).toBe(1);
+      }
+    });
+  }
+});
+

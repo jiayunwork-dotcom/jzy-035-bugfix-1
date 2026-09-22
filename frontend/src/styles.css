@@ -525,6 +525,42 @@ body {
   font-size: 12px;
 }
 
+/* 参与穷举输入选择器 */
+.input-picker {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fcfcfe;
+}
+.input-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+.input-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #fff;
+}
+.input-chip input {
+  margin: 0;
+  cursor: pointer;
+}
+.input-chip-name {
+  font-weight: 700;
+}
+.input-chip-value {
+  font-variant-numeric: tabular-nums;
+}
+
 /* 卡诺图 */
 .kmap {
   margin-bottom: 18px;

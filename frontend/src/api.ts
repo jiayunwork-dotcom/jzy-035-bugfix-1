@@ -48,11 +48,21 @@ export const api = {
   evaluate(circuit: Circuit) {
     return post<EvaluateResult>('/evaluate', circuit);
   },
-  analyze(circuit: Circuit) {
-    return post<AnalyzeResult>('/analyze', { circuit });
+  /**
+   * 分析电路。inputIds 给出参与穷举的输入开关 id 与列顺序；
+   * 省略或传全部 id 即穷举全部输入。未列入的开关在每行都保持其当前电平。
+   */
+  analyze(circuit: Circuit, inputIds?: string[]) {
+    return post<AnalyzeResult>('/analyze', {
+      circuit,
+      ...(inputIds ? { inputIds } : {})
+    });
   },
-  truthTableCsv(circuit: Circuit) {
-    return post<{ csv: string; filename: string }>('/truth-table/csv', { circuit });
+  truthTableCsv(circuit: Circuit, inputIds?: string[]) {
+    return post<{ csv: string; filename: string }>('/truth-table/csv', {
+      circuit,
+      ...(inputIds ? { inputIds } : {})
+    });
   },
   levels() {
     return get<{ levels: Level[] }>('/levels');

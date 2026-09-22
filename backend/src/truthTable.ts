@@ -40,6 +40,10 @@ function fallbackName(prefix: string, index: number) {
 
 /**
  * 穷举全部 2^n 个输入组合，逐行调用同一套求值内核，拼出完整真值表。
+ *
+ * 通过 options.inputIds 只挑部分输入开关时，真值表的列严格对应这些被选中的
+ * 开关（顺序与 inputIds 一致），未被选中的开关在每一行都保持其当前电平
+ * （node.value）参与运算；列与开关绝不错位。
  */
 export function buildTruthTable(
   circuit: Circuit,
@@ -66,10 +70,18 @@ export function buildTruthTable(
   const inputNames = inputs.map((node, i) => node.label?.trim() || fallbackName('X', i));
   const outputNames = outputs.map((node, i) => node.label?.trim() || fallbackName('F', i));
 
-  // 预先检查环：有环时不生成真值表
-  const probe = evaluate(withValues(circuit, inputs.map(() => 0)));
+  // 预先检查环：有环时不生成真值表。只把参与穷举的输入拨到 0，
+  // 未选中的输入保持其当前电平，避免预检改变电路语义。
+  // 环检测只看拓扑结构，与电平无关；放在零输入校验之前，使无输入的
+  // 反馈环电路仍报“反馈环”而不是“缺少输入”。
+  const selectedIds = inputs.map((x) => x.id);
+  const probe = evaluate(withValues(circuit, inputs.map(() => 0), selectedIds));
   if (probe.cyclic) {
     throw new Error('电路存在反馈环，无法穷举真值表');
+  }
+
+  if (n === 0) {
+    throw new Error('至少需要选择一个输入开关才能穷举真值表');
   }
 
   const rowCount = 2 ** n;
@@ -81,7 +93,8 @@ export function buildTruthTable(
       const bit = ((mask >> (n - 1 - i)) & 1) as Bit;
       inputBits.push(bit);
     }
-    const result = evaluate(withValues(circuit, inputBits, inputs.map((x) => x.id)));
+    // 只有选中的输入按本行取值替换；其余开关保持当前电平参与运算
+    const result = evaluate(withValues(circuit, inputBits, selectedIds));
     const outputBits = outputs.map((o) => result.outputLights[o.id] ?? 0);
     rows.push({ inputs: inputBits, outputs: outputBits });
   }
@@ -100,13 +113,19 @@ export function buildTruthTable(
   };
 }
 
-/** 返回一个把指定输入开关替换成给定电平后的新电路（不改原对象） */
+/**
+ * 返回一个把指定输入开关替换成给定电平后的新电路（不改原对象）。
+ *
+ * `ids` 与 `values` 按位置一一对应；未在 `ids` 中列出的输入开关保持其
+ * 当前电平不动（这正是“只挑一部分输入穷举、其余钉在当前电平”所依赖的语义）。
+ * 缺省 `ids` 时作用于电路中的全部输入开关。
+ */
 export function withValues(
   circuit: Circuit,
   values: Bit[],
   ids?: string[]
 ): Circuit {
-  const targetIds = defaultInputs(circuit).map((n) => n.id);
+  const targetIds = ids ?? defaultInputs(circuit).map((n) => n.id);
   const valueById = new Map<string, Bit>();
   targetIds.forEach((id, i) => valueById.set(id, values[i]!));
   return {
